@@ -57,41 +57,6 @@ class SentenceEquivalence(object):
     def own_features():
         pass # Could manually add features, but probably won't
 
-
-    def word_vector(self, word):
-        if self.lowercase_fallback:
-            token = self.current_token.lower()
-        else:
-            token = self.current_token
-        if token != None:
-            idx = self.w2id.get(word)
-            if idx:
-                return self.vec_cache[idx]
-            else:
-
-                p = self.pos_cache.get(token)
-                if not p:
-                    p = self.mo.find("\n{}".format(token).encode('utf8')) + 1
-                    self.pos_cache[token] = p
-                # normally find returns -1 if not found, but here we have +1
-                if p > 0:
-                    self.mo.seek(p)
-                else:
-                    v = self.w2id.get(SentenceEquivalence.PAD_SYMBOL)
-                    return self.vec_cache[v] if v else [-1] * self.D
-        else:
-            v = self.w2id.get(SentenceEquivalence.PAD_SYMBOL)
-            return self.vec_cache[v] if v else [-1] * self.D
-        line = self.mo.readline()
-        vec = list(map(float, line.decode('utf8').split()[1:]))
-
-        if self.current_token_id < SentenceEquivalence.MAX_CACHE_SIZE:
-            self.w2id[token] = self.current_token_id
-            self.vec_cache[self.current_token_id,:] = vec
-            self.current_token_id += 1
-        return vec
-
-
     class FeatureFunction(object):
         def __init__(self, func, boolean=True):
             self.func = func
@@ -145,7 +110,7 @@ class SentenceEquivalence(object):
                     return
             elif self.mincos_word_vectors:
                 combined_vector = self.minimum_cosine(vector1, vector2)
-                #print(f"COMBINED VECTORS{combined_vectors}")
+                # Steg 2: Lägg till elif statement här           
             else:
                 print("in here")
         else:
@@ -235,6 +200,9 @@ class SentenceEquivalence(object):
         while len(cos_sim_list)<77:
             cos_sim_list.append(0)
         return cos_sim_list        
+    def new_sentence_vector_similarity(self, vector1, vector2):
+        # Steg 3 implementera den här funktionen
+        pass
         
         # ----------------------------------------------------------
 
@@ -277,12 +245,6 @@ class SentenceEquivalence(object):
         self.w2id[SentenceEquivalence.PAD_SYMBOL] = self.current_token_id
         self.vec_cache[self.current_token_id,:] = vec
         self.current_token_id += 1
-        # Here you can add your own features.
-        self.features = [
-            SentenceEquivalence.FeatureFunction(self.word_vector, boolean=False),
-            # SentenceEquivalence.FeatureFunction(self.capitalized_token),
-            # SentenceEquivalence.FeatureFunction(self.first_token_in_sentence),
-        ]
         if training_file:
             # Train a model
             print("Processing Training file...")
@@ -315,6 +277,7 @@ class SentenceEquivalence(object):
             save_dir = "model_params_cos.txt"
         elif self.mincos_word_vectors:
             save_dir = "model_params_min_cos.txt"
+            #Steg 4 lägg till save dir för den nya metoden
         else:
             print("ERROR, method must be entered")
             return
@@ -354,7 +317,7 @@ def main():
     group3.add_argument('-sum', action='store_true', default=False, help='Use a sum of the word vectors ')
     group3.add_argument('-cos', action='store_true', default=False, help='Use a list of all cosine similarities')
     group3.add_argument('-mincos', action='store_true', default=False, help='Use a list of all minimum cosine similarities')
-
+    #Steg 1. lägg till argument här
 
     parser.add_argument('-lcf', '--lowercase-fallback', action='store_true')
 
