@@ -6,6 +6,12 @@ import sys
 import codecs
 from binary_logistic_minibatch import BinaryLogisticRegression
 from scipy.spatial import distance
+from sklearn.feature_extraction.text import TfidfVectorizer
+import re
+import csv
+import time
+import pickle
+
 
 
 """
@@ -45,7 +51,7 @@ class SentenceEquivalence(object):
     Word vector feature computation
     """
     PAD_SYMBOL = "<pad>"
-    MAX_CACHE_SIZE = 10000
+    MAX_CACHE_SIZE = 1000000
 
     def mmap_read_word_vectors(fname):
         # Don't forget to close both when done with them
@@ -53,6 +59,16 @@ class SentenceEquivalence(object):
         mmap_obj = mmap.mmap(file_obj.fileno(), length=0, access=mmap.ACCESS_READ)
         return mmap_obj, file_obj
 
+    def load_cache(self, filename):
+        try:
+            with open(filename, 'rb') as f:
+                return pickle.load(f)
+        except FileNotFoundError:
+            return {}
+
+    def save_cache(self, cache, filename):
+        with open(filename, 'wb') as f:
+            pickle.dump(cache, f)
 
     def own_features():
         pass # Could manually add features, but probably won't
@@ -79,43 +95,108 @@ class SentenceEquivalence(object):
         """
         Read the input file and return the dataset.
         """
+        if self.weighted_avg_word_vectors:
+            self.fitting_TFIDF(filename)
+        
         dataset = SentenceEquivalence.Dataset()
+        corpus = []
         with codecs.open(filename, 'r', 'utf-8') as f:
-            for line in f.readlines():
-                field = line.strip().split(',')
-                if len(field) == 6:
-                    self.process_data(dataset, field[3], field[4], field[5])
+            reader = csv.reader(f)
+            count=0
+            old_time = 0
+            start=time.time()
+            for line in reader:
+                count+=1
+
+                if count%10000 == 0:
+                    end= time.time()
+                    if start:
+                        print(f"length of cache {len(self.pos_cache)}")
+                        print(f"Time elapsed {end-start-old_time}")
+                        print(f"number of sentences: {count}")
+                        old_time = end-start
+
+                if len(line) == 3:
+
+                    field0 = self.clean_and_tokenize(line[0])
+                    field1 = self.clean_and_tokenize(line[1])
+                    corpus.append(field0)
+                    corpus.append(field1)
+                    self.process_data(dataset, field0, field1, line[2])
                 else:
-                    pass # here there is a coma in the sentence (i would assume)
+                    print("ERROR, length of line != 3")
+                    pass # We never get here
+
             return dataset
         return None
 
+    def fitting_TFIDF(self, filename):
+        """
+        Read the input file and return the dataset.
+        """
+        
+        dataset = SentenceEquivalence.Dataset()
+        corpus = []
+        with codecs.open(filename, 'r', 'utf-8') as f:
+            reader = csv.reader(f)
+            count=0
+            start = time.time()
+            for line in reader:
+                count+=1
+                if count%10000 == 0:
+                    print(f"sentence number: {count}")
+                if len(line) == 3:
+                    field0 = self.clean_and_tokenize(line[0])
+                    field1 = self.clean_and_tokenize(line[1])
+                    corpus.append(field0)
+                    corpus.append(field1)
+                else:
+                    pass
+            end = time.time()
+            print(f"Time to get corpus: {end - start}")
+            print(corpus[0:20])
+            self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(corpus)
+            print(f"self.tfidf_matrix.shape: {self.tfidf_matrix.shape}")
+        return None
+
+    def clean_and_tokenize(self, text):
+        text = text.lower()
+        text = re.findall(r'\b\w+\b', text)
+        text = ' '.join(text)
+        return text
 
     def process_data(self, dataset, sentence1, sentence2, label):
         """
         Processes one line (= one datapoint) in the input file to handle sentence equivalence.
         """
+        start = time.time()
         vector1 = self.compute_sentence_vector(sentence1)
         vector2 = self.compute_sentence_vector(sentence2)
+        
+        if self.weighted_avg_word_vectors:
+            vector1 = self.compute_weighted(sentence1, vector1)
+            vector2 = self.compute_weighted(sentence2, vector2)
         if len(vector1) > 0 and len(vector2)>0:
-
             if self.sum_word_vectors:
-                vector1 = np.sum(vector1, axis=0)    
-                vector2 = np.sum(vector2, axis=0)
+                vector1 = np.sum(vector1, axis=0)/len(sentence1)  
+                vector2 = np.sum(vector2, axis=0)/len(sentence1)
+                difference_v = abs(vector1 - vector2)
                 combined_vector = np.concatenate((vector1, vector2))
+                combined_vector = np.concatenate((combined_vector, difference_v))
 
             elif self.cos_sim_word_vectors:
                 combined_vector = self.cosine(vector1, vector2) 
-                if not combined_vector:
-                    return
+                combined_vector = np.sort(combined_vector)
+
             elif self.mincos_word_vectors:
                 combined_vector = self.minimum_cosine(vector1, vector2)
-                # Steg 2: Lägg till elif statement här           
+
             else:
-                print("in here")
+                return
         else:
             return
-
+        end = time.time()
+        #print(f"process_data: {end - start}")
         dataset.x.append(combined_vector)
         dataset.y.append(self.label_number(label))
 
@@ -132,33 +213,81 @@ class SentenceEquivalence(object):
         words = sentence.split()
         vectors = []
         for token in words:
+            start = time.time()
             if self.lowercase_fallback:
                 token = token.lower()
             idx = self.w2id.get(token, None)
             if idx is not None:
                 vectors.append(self.vec_cache[idx])
+                end = time.time()
             else:
-                p = self.pos_cache.get(token)
-                if not p:
-                    p = self.mo.find("\n{}".format(token).encode('utf8')) + 1
-                    self.pos_cache[token] = p
-                # normally find returns -1 if not found, but here we have +1
+                self.i+=1
+                if self.i <10000000:
+                    p = self.pos_cache.get(token)
+                    if not p:
+                        self.mo.seek(0) # reset  
+                        start=time.time()
+                        chunk_size = 10000  # size of chunks to read
+                        while time.time()-start<0.5:
+                            
+                            curr = self.mo.tell()
+                            chunk = self.mo.read(chunk_size)    
+                            if not chunk:
+                                break                    
+                            p = chunk.find("\n{}".format(token).encode('utf8')) + 1
+                            if p != 0:
+                                p = curr + p
+                                break
 
-                if p > 0:
-                    self.mo.seek(p)
-                    line = self.mo.readline()
-                    vec = list(map(float, line.decode('utf8').split()[1:]))
-                    if self.current_token_id < SentenceEquivalence.MAX_CACHE_SIZE:
-                        self.w2id[token] = self.current_token_id
-                        self.vec_cache[self.current_token_id, :] = vec
-                        self.current_token_id += 1
+                        #print(f"p for 'the' {p}")
+                        self.pos_cache[token] = p 
+                    # normally find returns -1 if not found, but here we have +1
+                    if p > 0:
+                        self.mo.seek(p)
+                        line = self.mo.readline()
+                        vec = list(map(float, line.decode('utf8').split()[1:]))
+                        #end = time.time()
+                        #print(f"Time when word added to cache {start-end}")
+                    else:
+                        # Handle missing vectors, use a zero vector
+                        end = time.time()
+                        vec = np.zeros(self.D)
+                        #print(f"Time when word not found {end-start}")
                     vectors.append(vec)
+                    #print(f"vectors_len{len(vectors)}")
                 else:
-                    # Handle missing vectors, use a zero vector
-                    vectors.append(np.zeros(self.D))
-        # return the word vectors for the whole sentence
+                    vec = np.zeros(self.D)
+                    vectors.append(np.zeros(self.D)) 
+                if self.current_token_id < SentenceEquivalence.MAX_CACHE_SIZE:
+
+                    self.w2id[token] = self.current_token_id
+                    self.vec_cache[self.current_token_id, :] = vec
+                    self.current_token_id += 1
+                else:
+                    print("error by max cache size")
+
+                # return the word vectors for the whole sentence
+                end = time.time()
+                #print(f"compute_sentence_vector:{end-start}")
+
         return vectors
 
+    def compute_weighted(self, sentence, vector):
+        words = sentence.split()
+        sentence_length = len(words)
+        tfidf_scores = self.tfidf_vectorizer.transform([' '.join(words)]).toarray()[0]
+        weights = []
+        for word in words:
+            tfidf_index = self.tfidf_vectorizer.vocabulary_.get(word)
+            if tfidf_index is not None:
+                weights.append(tfidf_scores[tfidf_index])
+            else:
+                weights.append(0.0)  # If the word is not found in the TF-IDF vectorizer, assign zero weight
+        weights = np.array(weights)
+        vector = np.array(vector)
+        for word_vec_i in range(len(vector)):
+            vector[word_vec_i] = weights[word_vec_i]*vector[word_vec_i]        
+        return vector
 
     def cosine(self, vector1, vector2):
         """
@@ -169,19 +298,22 @@ class SentenceEquivalence(object):
         Returns: a list of length len(sen1)*len(sen2). 
         """
         #Setting a limit to how long the cosine vector can be to have them all equal (maybe not ideal)
-        if len(vector1)*len(vector2)<400: 
-            self.sentenceunder200+=1
+        product_length = len(vector1)*len(vector2)
+        if product_length<400: 
             cos_sim_list = []
             for vec1 in vector1:
                 for vec2 in vector2:
                     cosine_sim = 1 - distance.cosine(vec1, vec2)
                     cos_sim_list.append(cosine_sim)
+            #cos_sim_list = [cos_sim_list[i]/(product_length) for i in range(product_length)]  
+
             while len(cos_sim_list)<400:
                 cos_sim_list.append(0)
-            return cos_sim_list        
+            return cos_sim_list     
         else:
-            self.sentenceover200 +=1
+            return np.zeros(400)
             #print(f"sentenceover200 {self.sentenceover200} sentence under200 {self.sentenceunder200}")
+
 
     def minimum_cosine(self, vector1, vector2):
         """
@@ -197,28 +329,53 @@ class SentenceEquivalence(object):
                 cosine_sim = 1 - distance.cosine(vec1, vec2)
                 cos_for_index.append(cosine_sim)
             cos_sim_list.append(min(cos_for_index))
-        while len(cos_sim_list)<77:
+            cos_sim_list.append(np.mean(cos_for_index))
+            cos_sim_list.append(max(cos_for_index))
+        while len(cos_sim_list)<3*self.longest_sentence:
             cos_sim_list.append(0)
-        return cos_sim_list        
+        if len(cos_sim_list)!=3*self.longest_sentence:
+            #print(f"lencossimlist{len(cos_sim_list)}")
+            return np.zeros(3*self.longest_sentence)
+        return cos_sim_list  
+
     def new_sentence_vector_similarity(self, vector1, vector2):
         # Steg 3 implementera den här funktionen
         pass
         
         # ----------------------------------------------------------
+    def input_sentence(self, sentence1, sentence2):
+        sentence_1 = self.clean_and_tokenize(sentence1)
+        sentence_2 = self.clean_and_tokenize(sentence2)
 
-        
+        vector1 = self.compute_sentence_vector(sentence1)
+        vector2 = self.compute_sentence_vector(sentence2)
+        vector1 = np.sum(vector1, axis=0)/len(sentence1)  
+        vector2 = np.sum(vector2, axis=0)/len(sentence1)
+        difference_v = abs(vector1 - vector2)
+        combined_vector = np.concatenate((vector1, vector2))
+        combined_vector = np.concatenate((combined_vector, difference_v))
+        combined_vector = np.concatenate(([1],combined_vector)) #adding bias
+        return combined_vector
+
 
     def __init__(self, training_file, test_file, model_file, word_vectors_file,
                  stochastic_gradient_descent, minibatch_gradient_descent, lowercase_fallback,
-                 sum_word_vectors, cos_sim_word_vectors, mincos_word_vectors):
+                 sum_word_vectors, cos_sim_word_vectors, mincos_word_vectors, weighted_avg_word_vectors,
+                 loadcache):
         """
         Constructor. Trains and tests a SentenceEquivalence model using binary logistic regression.
         """
         if training_file:
-            training_file = 'data/q_pair_train.csv'
-        self.sentenceover200=0
-        self.sentenceunder200=0
-        self.longest_sentence=77
+            training_file = 'data/train.csv'
+
+
+        # Initialize TF-IDF vectorizer and compute TF-IDF matrix for the corpus
+        self.tfidf_vectorizer = TfidfVectorizer()
+        self.i = 0
+        self.loadcache=loadcache
+        self.longest_sentence=78
+        self.weighted_avg_word_vectors = weighted_avg_word_vectors # this is tfidf True/False
+
         self.mincos_word_vectors = mincos_word_vectors
         self.lowercase_fallback = lowercase_fallback
         self.sum_word_vectors = sum_word_vectors
@@ -242,13 +399,32 @@ class SentenceEquivalence(object):
         self.current_token_id += 1
 
         p = self.mo.find(SentenceEquivalence.PAD_SYMBOL.encode('utf8'))
+
         self.w2id[SentenceEquivalence.PAD_SYMBOL] = self.current_token_id
         self.vec_cache[self.current_token_id,:] = vec
         self.current_token_id += 1
+
+       
+
         if training_file:
+            if self.loadcache:
+                # Loads these from files, much faster because the .find call in create sentence vectors is very slow 
+                self.pos_cache = {}
+                self.vec_cache = np.zeros((SentenceEquivalence.MAX_CACHE_SIZE, self.D))
+                self.w2id = {}
+                self.pos_cache = self.load_cache('pos_cache.pkl')
+                self.vec_cache = self.load_cache('vector_cache.pkl')
+                self.w2id = self.load_cache('w2id.pkl')
+            
             # Train a model
             print("Processing Training file...")
             training_set = self.read_and_process_data(training_file)
+            if not self.loadcache:
+                self.save_cache(self.pos_cache, 'pos_cache.pkl')
+                self.save_cache(self.vec_cache, 'vector_cache.pkl')
+                self.save_cache(self.w2id,'w2id.pkl')
+
+
             if training_set:
                 print("Training Model... ")
 
@@ -271,24 +447,59 @@ class SentenceEquivalence(object):
                 b = BinaryLogisticRegression(theta=model)
         
         # Saving the trained model
-        if self.sum_word_vectors:
-            save_dir = "model_params_sum.txt"
-        elif self.cos_sim_word_vectors:
-            save_dir = "model_params_cos.txt"
-        elif self.mincos_word_vectors:
-            save_dir = "model_params_min_cos.txt"
-            #Steg 4 lägg till save dir för den nya metoden
+        if self.sum_word_vectors and not self.weighted_avg_word_vectors:
+            save_dir = "model_params_sum"
+        elif self.cos_sim_word_vectors and not self.weighted_avg_word_vectors:
+            save_dir = "model_params_cos"
+        elif self.mincos_word_vectors and not self.weighted_avg_word_vectors:
+            save_dir = "model_params_min_cos"
+        elif self.weighted_avg_word_vectors and sum_word_vectors:  # Save directory for the new method
+            save_dir = "model_params_sum_tfidf"
+        elif self.weighted_avg_word_vectors and self.cos_sim_word_vectors:
+            save_dir = "model_params_cos_tfidf"
+        elif self.weighted_avg_word_vectors and self.mincos_word_vectors:
+            save_dir = "model_params_mincos_tfidf"
         else:
             print("ERROR, method must be entered")
             return
         # Test the model on a test set
         print("Processing test file")
+
+        self.pos_cache = {}
+        self.vec_cache = np.zeros((SentenceEquivalence.MAX_CACHE_SIZE, self.D))
+        self.w2id = {}
+        if self.loadcache and test_file == "data/test.csv":
+            print("yes")
+            # Loads these from files, much faster because the .find call in create sentence vectors is very slow 
+            self.pos_cache = self.load_cache('pos_cache_test.pkl')
+            self.vec_cache = self.load_cache('vector_cache_test.pkl')
+            self.w2id = self.load_cache('w2id_test.pkl')
+            print(f"length of cache: {len(self.pos_cache)}")
+
+                
         test_set = self.read_and_process_data(test_file)
+        if not self.loadcache:
+            self.save_cache(self.pos_cache, "pos_cache_test.pkl")
+            self.save_cache(self.vec_cache, "vector_cache_test.pkl")
+            self.save_cache(self.w2id, "w2id_test.pkl")
+
         print("Finished processing test file")
         if test_set:
             b.classify_datapoints(test_set.x, test_set.y, save_dir=save_dir)
+        sentence1, sentence2 = "", ""
 
-
+        while sentence1 != "f" or sentence2!="f":
+            print("Enter f to finish the program")
+            sentence1 = input("Enter the first sentence: ")
+            sentence2 = input("Enter the second sentence: ")
+            feature_vector = self.input_sentence(sentence1, sentence2)
+            print(len(feature_vector))
+            prob = b.sigmoid(np.dot(feature_vector, b.theta))
+            if prob>0.5:
+                label="the same thing!"
+            else:
+                label="different things!"
+            print(f"The model predicts the sentences to ask: {label}")
     # ----------------------------------------------------------
 
 def main():
@@ -296,10 +507,10 @@ def main():
     Main method. Decodes command-line arguments, and starts the Named Entity Recognition.
     """
 
-    parser = argparse.ArgumentParser(description='Named Entity Recognition', usage='\n* If the -d and -t are both given, the program will train a model, and apply it to the test file. \n* If only -t and -m are given, the program will read the model from the model file, and apply it to the test file.')
+    parser = argparse.ArgumentParser(description='Named Entity Recognition', usage='\n* Give method (-sum/-cos/-mincos/-tfidf) and -d or -m')
 
     required_named = parser.add_argument_group('required named arguments')
-    required_named.add_argument('-t', type=str,  required=False, default="data/q_pair_test.csv", help='test file (mandatory)')
+    required_named.add_argument('-t', type=str,  required=False, default="data/test.csv", help='test file (mandatory)')
     required_named.add_argument('-w', type=str, required=False, default="data/en.vectors", help='file with word vectors')
 
     group = required_named.add_mutually_exclusive_group(required=True)
@@ -311,13 +522,18 @@ def main():
     group2.add_argument('-b', action='store_true', default=False, help='Use batch gradient descent')
     group2.add_argument('-mgd', action='store_true', default=True, help='Use mini-batch gradient descent')
 
-
     # New arguments to choose way of representing the sentences 
     group3 = parser.add_mutually_exclusive_group(required=True)
     group3.add_argument('-sum', action='store_true', default=False, help='Use a sum of the word vectors ')
     group3.add_argument('-cos', action='store_true', default=False, help='Use a list of all cosine similarities')
     group3.add_argument('-mincos', action='store_true', default=False, help='Use a list of all minimum cosine similarities')
-    #Steg 1. lägg till argument här
+    #Step 1: add arguments for other metrics
+
+    group4 = parser.add_mutually_exclusive_group(required=False)
+    group4.add_argument('-tfidf', action='store_true', default=False, help='Use a tf-idf weight on the word embeddings')
+
+    group4 = parser.add_mutually_exclusive_group(required=False)
+    group4.add_argument('-loadcache', action='store_true', default=False, help='Loads cache for word vectors (much much faster, but requires the file)')
 
     parser.add_argument('-lcf', '--lowercase-fallback', action='store_true')
 
@@ -328,7 +544,7 @@ def main():
 
     arguments = parser.parse_args()
 
-    sed = SentenceEquivalence(arguments.d, arguments.t, arguments.m, arguments.w, arguments.s, arguments.mgd, arguments.lowercase_fallback, arguments.sum, arguments.cos, arguments.mincos)
+    sed = SentenceEquivalence(arguments.d, arguments.t, arguments.m, arguments.w, arguments.s, arguments.mgd, arguments.lowercase_fallback, arguments.sum, arguments.cos, arguments.mincos, arguments.tfidf, arguments.loadcache)
     sed.mo.close()
     sed.fo.close()
 

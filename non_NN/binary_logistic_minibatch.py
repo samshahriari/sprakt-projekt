@@ -22,7 +22,7 @@ class BinaryLogisticRegression(object):
     LEARNING_RATE = 0.01  # The learning rate.
     CONVERGENCE_MARGIN = 0.001  # The convergence criterion.
     MAX_ITERATIONS = 100 # Maximal number of passes through the datapoints in stochastic gradient descent.
-    MINIBATCH_SIZE = 1000 # Minibatch size (only for minibatch gradient descent)
+    MINIBATCH_SIZE = 1 # Minibatch size (only for minibatch gradient descent)
 
     # ----------------------------------------------------------------------
 
@@ -94,18 +94,19 @@ class BinaryLogisticRegression(object):
         Performs Mini-batch Gradient Descent.
         """
         self.LEARNING_RATE = 0.01
-        #self.init_plot(self.FEATURES)
         iteration = 0
         print("Starting Mini-Batch Fit...")
         num_batches = self.DATAPOINTS // self.MINIBATCH_SIZE
-        weight = {0 : 0.5, 1: 0.5} # Apply weights as needed
-        max_iter = 80
+        weight = {0 : 0.4, 1: 0.6} # Apply weights as needed
+        max_iter = 50
         old_grad = 1
         increase_counter=0
         while iteration < max_iter:
-            print(np.sum(np.square(self.gradient)))
-            print(iteration)
+            if iteration%1==0:
+                print(np.sum(np.square(self.gradient)))
+                print(f"iteration: {iteration}")
             iteration += 1
+            #print(f"num batches: {num_batches}")
             for batch_i in range(num_batches):
                 start_i = batch_i * self.MINIBATCH_SIZE
                 end_i = start_i + self.MINIBATCH_SIZE
@@ -119,22 +120,14 @@ class BinaryLogisticRegression(object):
                     error = h * weight[yi]
                     self.gradient += xi * error
                 self.gradient /= self.MINIBATCH_SIZE
+                
                 self.theta -= self.LEARNING_RATE * self.gradient
-                if self.CONVERGENCE_MARGIN*0.001>np.sum(np.square(self.gradient)):
-                    print("CONVERGENCE REACHED")
-                    print(f"Converged gradient: {np.sum(np.square(self.gradient))}")
-                    return
-            if old_grad<np.sum(np.square(self.gradient)):
-                increase_counter +=1
-                if increase_counter >3:
-                    print("Gradient increased 4 times")
-                    return
             else:
                 increase_counter = 0
             old_grad = np.sum(np.square(self.gradient))
-        print("Finished Batch Gradient Descent")
+        print("Finished Stochastic Gradient Descent")
 
-    def confusion_metrics(self, conf):
+    def confusion_metrics(self, conf, save_dir):
         TP = conf[1][1]
         TN = conf[0][0]
         FP = conf[1][0]
@@ -143,18 +136,23 @@ class BinaryLogisticRegression(object):
         print("Accuracy: " + str(Accuracy))
 
 
-        Recall = TP/(TP+FN)
-        Precision = TP/(TP+FP) # True positive/ predicted positives
+        Recall_1 = TP/(TP+FN)
+        Precision_1 = TP/(TP+FP) # True positive/ predicted positives
         print("Metrics from confusion matrics for class name")
-        print("Recall: " + str(Recall))
-        print("Precision: " + str(Precision))
+        print("Recall: " + str(Recall_1))
+        print("Precision: " + str(Precision_1))
 
 
-        Recall = TN/(TN+FP)
-        Precision = TN/(TN + FN)
+        Recall_0 = TN/(TN+FP)
+        Precision_0 = TN/(TN + FN)
         print("Metrics from confusion matrics for class no name")
-        print("Recall: " + str(Recall))
-        print("Precision: " + str(Precision))
+        print("Recall: " + str(Recall_0))
+        print("Precision: " + str(Precision_0))
+        with open(save_dir +"_Metrics", "w") as file:
+            file.write(f"Accuracy : {Accuracy}\n"
+            f"For class 0 (different), Recall: {Recall_0}, Precision: {Precision_0}\n"
+            f"For class 1 (same), Recall: {Recall_1}, Precision: {Precision_1}"
+            )
 
     def classify_datapoints(self, test_data, test_labels, save_dir):
         """
@@ -166,7 +164,7 @@ class BinaryLogisticRegression(object):
         with codecs.open(save_dir, 'w', 'utf-8') as f:
             f.write(theta_str)
             
-        print('  '.join('{:d}: {:.4f}'.format(k, self.theta[k]) for k in range(self.FEATURES)))
+        #print('  '.join('{:d}: {:.4f}'.format(k, self.theta[k]) for k in range(self.FEATURES)))
         self.DATAPOINTS = len(test_data)
         self.x = np.concatenate((np.ones((self.DATAPOINTS, 1)), np.array(test_data)), axis=1)
         self.y = np.array(test_labels)
@@ -175,7 +173,7 @@ class BinaryLogisticRegression(object):
             prob = self.conditional_prob(1, d)
             predicted = 1 if prob > .5 else 0
             confusion[predicted][self.y[d]] += 1
-        self.confusion_metrics(confusion)
+        self.confusion_metrics(confusion, save_dir)
 
         print('                       Real class')
         print('                 ', end='')
