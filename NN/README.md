@@ -1,3 +1,3 @@
-If you do not have transformers library you need to install it. This can be done by opening [a fine tuning notebook](./fine-tuning.ipynb) and running the pip cell. This notebook should also be used if you want to re-fine tune the model or evaluate it. If you just want to try it out for you own sentences you should instead use the [demo](./demo.ipynb).
+If you do not have transformers library you need to install it. This can be done by opening [a fine tuning notebook](./fine-tuning.ipynb) and running the pip cell. This notebook should also be used to re-fine tune the model or evaluate it. If you just want to try it out for you own sentences you should instead use the [demo](./demo.ipynb) (model is to big for github so you need to fine tune and save the model first).
 
 The files that starts with `hyper-` can be ignored as they were just used for hyper parameter search.
