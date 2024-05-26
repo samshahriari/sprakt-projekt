@@ -160,3 +160,5 @@ cython_debug/
 #.idea/
 Datasets/question_pairs.csv
 test_trainer*/
+hyper-*/
+fine-tuning*/
