@@ -1,0 +1,3 @@
+Accuracy : 0.6461842918985776
+For class 0 (different), Recall: 0.676819280867327, Precision: 0.7425869667536691
+For class 1 (same), Recall: 0.5930460664276533, Precision: 0.5140729447636918
