@@ -7,4 +7,6 @@ for much faster execution the second time. This only has to be run 1 time.
 Run run_with_cache.sh
 There are 6 different configurations to try. All but one of these is commented out in the run_with_cache.sh file. 
 
+Also possible to use model parameters, then use -m and some model parameters and remove -d. The cache will still have to be created for the test data though
+
 
